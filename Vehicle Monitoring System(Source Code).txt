@@ -1,0 +1,119 @@
+import cv2
+import numpy as np
+import time
+
+# Constants and variables
+largura_min = 80
+altura_min = 80
+offset = 6
+pos_linha = 550
+delay = 60
+detec = []
+ctr = 0
+
+# Conversion factor for speed calculation (adjust based on video scale)
+PIXELS_TO_KM_FACTOR = 0.000264583  # Adjust this value based on your video scale
+
+
+# Function to calculate distance between two points
+def calculate_distance(point1, point2):
+    return np.sqrt((point2[0] - point1[0]) * 2 + (point2[1] - point1[1]) * 2)
+
+
+# Function to calculate speed in km/h
+def calculate_speed_kmh(distance_pixels, time_seconds):
+    distance_km = distance_pixels * PIXELS_TO_KM_FACTOR
+    time_hours = time_seconds / 3600  # Convert time from seconds to hours
+    speed_kmh = distance_km / time_hours
+    return speed_kmh
+
+
+# Function to calculate centroid
+def pega_centro(x, y, w, h):
+    x1 = int(w / 2)
+    y1 = int(h / 2)
+    cx = x + x1
+    cy = y + y1
+    return cx, cy
+
+
+# Video Capture
+cap = cv2.VideoCapture("/Users/Dell/Downloads/Vehicles.mp4")
+
+# Background subtractor
+subtractbg = cv2.bgsegm.createBackgroundSubtractorMOG()
+
+# Previous centroid and time
+prev_centroid = None
+prev_time = None
+
+# Main loop
+while True:
+    try:
+        ret, frame1 = cap.read()
+        width = int(cap.get(3))
+        heigth = int(cap.get(4))
+        tempo = float(1 / delay)
+        time.sleep(tempo)
+        if heigth == 360:
+            frame1 = cv2.resize(frame1, (0, 0), fx=2, fy=2)
+        elif heigth == 1080:
+            frame1 = cv2.resize(frame1, (0, 0), fx=0.7, fy=0.7)
+        elif heigth == 480:
+            frame1 = cv2.resize(frame1, (0, 0), fx=1.2, fy=1.6)
+        grey_img = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        blur_img = cv2.GaussianBlur(grey_img, (3, 3), 5)
+
+        img_sub = subtractbg.apply(blur_img)
+        dilat = cv2.dilate(img_sub, np.ones((5, 5)))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        dilatada = cv2.morphologyEx(dilat, cv2.MORPH_CLOSE, kernel)
+        dilatada = cv2.morphologyEx(dilatada, cv2.MORPH_CLOSE, kernel)
+        dilatada = cv2.morphologyEx(dilat, cv2.MORPH_CLOSE, kernel)
+        contorno, h = cv2.findContours(dilatada, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        cv2.line(frame1, (25, pos_linha), (1200, pos_linha), (255, 127, 0), 3)
+        for (i, c) in enumerate(contorno):
+            (x, y, w, h) = cv2.boundingRect(c)
+            validar_contorno = not ((w >= largura_min) and (h >= altura_min))
+            if validar_contorno:
+                continue
+
+            cv2.rectangle(frame1, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            centro = pega_centro(x, y, w, h)
+            detec.append(centro)
+            cv2.circle(frame1, centro, 4, (0, 0, 255), -1)
+
+            if prev_centroid is not None:
+                # Calculate distance between current and previous centroid
+                distance = calculate_distance(prev_centroid, centro)
+                # Calculate time elapsed
+                current_time = time.time()
+                elapsed_time = current_time - prev_time
+                # Calculate speed
+                speed_pixels_per_second = distance / elapsed_time
+                speed_kmh = calculate_speed_kmh(distance, elapsed_time)
+                # Display speed
+                cv2.putText(frame1, f"Speed: {speed_kmh:.2f} km/h", (x, y - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (255, 255, 255), 2)
+
+            prev_centroid = centro
+            prev_time = time.time()
+
+            for (x, y) in detec:
+                if y < (pos_linha + offset) and y > (pos_linha - offset):
+                    ctr += 1
+                    cv2.line(frame1, (25, pos_linha), (1200, pos_linha), (0, 127, 255), 3)
+                    detec.remove((x, y))
+
+        cv2.putText(frame1, "VEHICLE COUNT IS: " + str(ctr), (30, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 5)
+        cv2.putText(frame1, "RMKCET", (30, 500), cv2.FONT_ITALIC, 1, (255, 255, 0), 5)
+        cv2.imshow("Vehicle Detector", frame1)
+
+        if cv2.waitKey(1) == 27 or cv2.waitKey(1) == ord('q'):
+            break
+    except:
+        pass
+
+print("Total detected cars: " + str(ctr))
+exit()
